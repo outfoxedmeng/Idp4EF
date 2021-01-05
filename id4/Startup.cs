@@ -10,6 +10,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.EntityFrameworkCore;
 using IdentityServerHost.Quickstart.UI;
+using IdentityServer4.EntityFramework.DbContexts;
+using System.Linq;
+using IdentityServer4.EntityFramework.Mappers;
+using Microsoft.Extensions.Logging;
 
 namespace IdpEF
 {
@@ -27,6 +31,7 @@ namespace IdpEF
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddControllersWithViews();
+            services.AddDatabaseDeveloperPageExceptionFilter();
 
             var connectionString = Configuration.GetConnectionString("DefaultConnection");
             var migrationsAssebly = typeof(Startup).Assembly.GetName().Name;
@@ -78,12 +83,13 @@ namespace IdpEF
             //    });
         }
 
-        public void Configure(IApplicationBuilder app)
+        public void Configure(IApplicationBuilder app, ILogger<Startup> logger)
         {
+            InitializeDatabase(app,logger);
             if (Environment.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
-                app.UseDatabaseErrorPage();
+                app.UseMigrationsEndPoint();
             }
 
             app.UseStaticFiles();
@@ -95,6 +101,49 @@ namespace IdpEF
             {
                 endpoints.MapDefaultControllerRoute();
             });
+        }
+
+        private void InitializeDatabase(IApplicationBuilder app, ILogger<Startup> logger)
+        {
+            using (var serviceScope = app.ApplicationServices.GetService<IServiceScopeFactory>().CreateScope())
+            {
+                //执行迁移，数据库不存在，则创建
+                serviceScope.ServiceProvider.GetRequiredService<PersistedGrantDbContext>().Database.Migrate();
+
+                var context = serviceScope.ServiceProvider.GetRequiredService<ConfigurationDbContext>();
+                context.Database.Migrate();
+
+                logger.LogInformation("=================");
+                //若数据库中没有数据，则灌入初始化数据
+                if (!context.Clients.Any())
+                {
+                    logger.LogInformation("~~~~~~~~~~~~");
+                    foreach (var client in Config.Clients)
+                    {
+                        context.Clients.Add(client.ToEntity());
+                    }
+                    context.SaveChanges();
+                }
+
+                if (!context.IdentityResources.Any())
+                {
+                    foreach (var resource in Config.IdentityResources)
+                    {
+                        context.IdentityResources.Add(resource.ToEntity());
+                    }
+                    context.SaveChanges();
+                }
+                if (!context.ApiScopes.Any())
+                {
+                    foreach (var api in Config.ApiScopes)
+                    {
+                        context.ApiScopes.Add(api.ToEntity());
+                    }
+                    context.SaveChanges();
+                }
+
+            }
+
         }
     }
 }
